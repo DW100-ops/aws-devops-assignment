@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS DevOps Assignment - Task 7 Infrastructure Stack'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: devops-assignment
+    Description: Environment name prefix for resources
+
+Resources:
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP and SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-sg'
+
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: ami-0c55b159cbfafe1f0
+      SecurityGroupIds:
+        - !Ref WebServerSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "<h1>Welcome to AWS DevOps Assignment</h1>" > /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-web-server'
+
+  AppS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bucket'
+
+Outputs:
+  EC2PublicIP:
+    Description: Public IP of the web server
+    Value: !GetAtt WebServerInstance.PublicIp
+
+  S3BucketName:
+    Description: Name of the created S3 bucket
+    Value: !Ref AppS3Bucket
