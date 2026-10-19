@@ -1,9 +1,20 @@
-# Security Documentation - AWS DevOps Assignment
+# Security Documentation
 
-## Why IAM Roles Are Preferable to Hard-Coded Access Keys
+This document outlines the security posture, access decisions, and isolation mechanisms implemented for the AWS DevOps assignment.
 
-Hard-coding AWS access keys (Access Key ID and Secret Access Key) directly into application code, configuration files, or user data scripts presents severe security risks. IAM roles solve these risks through several architectural advantages:
+## 1. Security Groups (`WebServerSecurityGroup`)
+- **Inbound Rules:** Restricted strictly to necessary traffic vectors. Port `80` (HTTP) is opened for public web traffic access, and Port `22` (SSH) is permitted for administrative maintenance.
+- **Outbound Rules:** Retains default unrestricted egress (`0.0.0.0/0`) to allow package updates and software installations via Amazon Linux repositories.
 
-1. **No Stored Credentials on Disk:** IAM roles leverage temporary, automatically rotating security tokens managed securely behind the scenes by the AWS Security Token Service (STS). No permanent credentials are saved on the EC2 instance's file system where they could potentially be compromised.
-2. **Reduced Blast Radius & Principle of Least Privilege:** If an application or instance is compromised, an attacker with hard-coded keys gains permanent, long-term access to your AWS account. With IAM roles, permissions are scoped specifically to the resources the workload requires (e.g., S3 read-only access), limiting potential exposure.
-3. **No Manual Key Rotation:** Hard-coded keys require manual rotation and retirement schedules to maintain security compliance, creating administrative overhead and human error risks. IAM roles handle credential lifecycle management and rotation completely automatically.
+## 2. Identity and Access Management (IAM) & Least Privilege
+- **No Hardcoded Credentials:** Credentials (AWS Access Keys) are completely omitted from application code and repository files to prevent credential leakage.
+- **Instance Profile & Role:** The EC2 instance utilizes an attached IAM role (`WebServerRole`) that assumes permission boundaries dynamically.
+- **Least Privilege Enforced:** The role is scoped strictly to `AmazonS3ReadOnlyAccess`, ensuring the application can read or list required bucket contents without having write, delete, or administrative control over the broader AWS account.
+
+## 3. S3 Access Decisions
+- Public direct access is restricted. 
+- The S3 bucket is accessed securely from within AWS boundaries by the EC2 instance using its assigned IAM role, minimizing exposure surface to the public internet.
+
+## 4. Secret-Handling Practices
+- Secrets and sensitive keys are excluded from version control. 
+- Environment variables and dynamic IAM roles replace static secrets, adhering to cloud security best practices.
