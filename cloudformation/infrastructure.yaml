@@ -1,37 +1,134 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'AWS DevOps Assignment - Task 7 Infrastructure Stack'
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS DevOps Assignment - CloudFormation Infrastructure Stack - Updated"
 
 Parameters:
   EnvironmentName:
     Type: String
-    Default: devops-assignment
-    Description: Environment name prefix for resources
+    Default: 'dev'
+    Description: 'Environment name for tagging'
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+    Description: 'Automatically fetches the latest Amazon Linux 2023 AMI'
 
 Resources:
+  # 1. Virtual Private Cloud (VPC)
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-vpc'
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # 2. Subnet
+  MySubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-subnet'
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Internet Gateway & Route Table (Required for public EC2 connectivity)
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-igw'
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MySubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # 3. Security Group
   WebServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Enable HTTP and SSH access
+      VpcId: !Ref MyVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+          Description: Allow HTTP traffic
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
+          Description: Allow SSH access (restrict in production)
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-sg'
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
 
+  # 4. S3 Bucket
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'aws-devops-assignment-cf-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # 5. EC2 Instance
   WebServerInstance:
     Type: AWS::EC2::Instance
     Properties:
+      ImageId: !Ref LatestAmiId
       InstanceType: t3.micro
-      ImageId: ami-0c55b159cbfafe1f0
+      SubnetId: !Ref MySubnet
       SecurityGroupIds:
         - !Ref WebServerSecurityGroup
+      IamInstanceProfile: !Ref WebServerInstanceProfile
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
@@ -39,25 +136,87 @@ Resources:
           yum install -y httpd
           systemctl start httpd
           systemctl enable httpd
-          echo "<h1>Welcome to AWS DevOps Assignment</h1>" > /var/www/html/index.html
+          echo "<h1>Welcome to AWS DevOps Assignment - CloudFormation Edition</h1>" > /var/www/html/index.html
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-web-server'
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
 
-  AppS3Bucket:
-    Type: AWS::S3::Bucket
+  # 6. IAM Role and Instance Profile for EC2
+  WebServerRole:
+    Type: AWS::IAM::Role
     Properties:
-      VersioningConfiguration:
-        Status: Enabled
+      RoleName: !Sub '${EnvironmentName}-WebServerRole-${AWS::StackName}'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
       Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-bucket'
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
+
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${EnvironmentName}-WebServerInstanceProfile-${AWS::StackName}'
+      Roles:
+        - !Ref WebServerRole
+
+  # 7. CloudWatch Monitoring & SNS Notifications
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${EnvironmentName}-AlarmTopic-${AWS::StackName}'
+      Tags:
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: 'dlw10053@gmail.com'
+      TopicArn: !Ref AlarmTopic
+
+  CPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-HighCPU-Alarm-${AWS::StackName}'
+      AlarmDescription: 'Alarm if CPU utilization exceeds 70% for 5 minutes'
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref WebServerInstance
+      AlarmActions:
+        - !Ref AlarmTopic
+      Tags:
+        - Key: Owner
+          Value: 'den'
+        - Key: Project
+          Value: 'aws-devops-assignment'
 
 Outputs:
-  EC2PublicIP:
-    Description: Public IP of the web server
-    Value: !GetAtt WebServerInstance.PublicIp
-
+  WebsiteURL:
+    Description: Public URL for the EC2 web server
+    Value: !Sub 'http://${WebServerInstance.PublicIp}'
   S3BucketName:
-    Description: Name of the created S3 bucket
-    Value: !Ref AppS3Bucket
+    Description: Created S3 Bucket Name
+    Value: !Ref MyS3Bucket
